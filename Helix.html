@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+html, body {
+  width:100%;
+  height:100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background:#111;
+  overflow:hidden;
+}
+
+svg {
+  width:80%;
+  height:80%;
+  max-width:400px;
+  max-height:400px;  
+}
+</style>
+</head>
+<body>
+    <script>
+"use strict";
+
+window.addEventListener("load",function() {
+
+  const NB_MIN_SQUARES = 20;
+  const NB_MAX_SQUARES = 100;
+  const NB_MIN_DIV     = 3;   // nb of divisions in a square side
+  const NB_MAX_DIV     = 7;
+
+  let canv, ctx;    // canvas and context
+  let maxx, maxy;   // canvas dimensions
+
+  let nbx, nby, lSide;
+  let nbDiv, lDiv;
+  let offsx, offsy; // position of top left corner of square (0, 0)
+  let grid;
+  let hue, sat;
+  let lines;
+  let monochrome;
+  let varSat; // variable sat (in hsl)
+  let firstRun = true;
+
+// for animation
+  let events;
+
+// shortcuts for Math.
+  const mrandom = Math.random;
+  const mfloor = Math.floor;
+  const mround = Math.round;
+  const mceil = Math.ceil;
+  const mabs = Math.abs;
+  const mmin = Math.min;
+  const mmax = Math.max;
+
+  const mPI = Math.PI;
+  const mPIS2 = Math.PI / 2;
+  const mPIS3 = Math.PI / 3;
+  const m2PI = Math.PI * 2;
+  const m2PIS3 = Math.PI * 2 / 3;
+  const msin = Math.sin;
+  const mcos = Math.cos;
+  const matan2 = Math.atan2;
+
+  const mhypot = Math.hypot;
+  const msqrt = Math.sqrt;
+
+  const rac3   = msqrt(3);
+  const rac3s2 = rac3 / 2;
+
+//------------------------------------------------------------------------
+
+function alea (mini, maxi) {
+// random number in given range
+
+  if (typeof(maxi) == 'undefined') return mini * mrandom(); // range 0..mini
+
+  return mini + mrandom() * (maxi - mini); // range mini..maxi
+}
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+function intAlea (mini, maxi) {
+// random integer in given range (mini..maxi - 1 or 0..mini - 1)
+//
+  if (typeof(maxi) == 'undefined') return mfloor(mini * mrandom()); // range 0..mini - 1
+  return mini + mfloor(mrandom() * (maxi - mini)); // range mini .. maxi - 1
+}
+
+//------------------------------------------------------------------------
+function Point(kp, kSide, square) {
+
+  this.kp = kp;          // position along side
+  this.kSide = kSide;   // index of side where point is
+  this.square = square; // square where this point is
+  this.x = [square.x0 + lDiv / 2, square.x0 + lSide, square.x0 + lSide - lDiv / 2, square.x0][kSide] + [kp,0,-kp,0][kSide] * lDiv;
+  this.y = [square.y0, square.y0 + lDiv / 2, square.y0 + lSide, square.y0 + lSide - lDiv / 2][kSide] + [0,kp,0, -kp][kSide] * lDiv;
+
+} // Point
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+Point.prototype.neighbor = function() {
+/* returns same points, but in neighbor square (or false if no neighbor square)
+*/
+
+  const nsq = this.square.neighbor(this.kSide);
+  if (nsq === false) return false;
+  return nsq.points[this.kSide ^ 2][nbDiv - 1 - this.kp];
+
+} //
+
+//------------------------------------------------------------------------
+
+function Square (kx, ky) {
+/*
+Vertices are numbered 0 to 3 starting from top left, turning clockwise
+Sides are numbered 0 to 3 starting from top, turninbg clockwise. Thus,
+side n is between vertices n and (n + 1) % 4
+Points are numbered 0 to nbDiv - 1 on each side, turning clockwise.
+*/
+/*
+In this version, the square is divided in 4 rectangles by a single point.
+Another version to try in the future : the square if initially divided by a
+randomly vertical or horizontal line, and each rectangle divided into two at its
+turn
+*/
+
+/* division positions range from 0 (nothing 'above' or 'on the left of' the cutting
+point) to nbDiv included (nothing 'below' or 'on the right of' the cutting point)
+*/
+
+  this.kx = kx;
+  this.ky = ky;
+
+  this.cutx0 = intAlea(1, nbDiv);
+  this.cuty0 = intAlea(1, nbDiv);
+  this.cutx1 = intAlea(1, nbDiv);
+  this.cuty1 = intAlea(1, nbDiv);
+
+  if (intAlea(2) == 0) {
+    this.cutx1 = this.cutx0;
+  } else {
+    this.cuty1 = this.cuty0;
+  }
+
+  this.x0 = offsx + kx * lSide;
+  this.y0 = offsy + ky * lSide;
+
+  this.points = new Array(4).fill(0).map((v,kSide) => new Array(nbDiv).fill(0).map((v, kp) =>new Point(kp, kSide, this)));
+
+} // Square
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+Square.prototype.connectPoints = function() {
+
+  let pa,pb
+  const lDiv2 = lDiv / 2;
+  const lSide2 = lSide - lDiv2;
+  const K = 0.3; // ratio radius / lSide for largest arcs
+
+/* upper left corner rectangles */
+  let kx = this.cutx0 - 1;
+  let ky = this.cuty0 - 1;
+  while (kx >= 0 && ky >= 0) {
+    pa = this.points[0][kx];
+    pb = this.points[3][nbDiv - 1 - ky];
+    associate(pa, pb);
+    --kx; --ky;
+  }
+
+/* upper right corner rectangles */
+  kx = this.cutx0;
+  ky = this.cuty1 - 1;
+  while (kx < nbDiv && ky >= 0) {
+    pa = this.points[0][kx];
+    pb = this.points[1][ky];
+    associate(pa, pb);
+    ++kx; --ky;
+  }
+  
+/* lower left corner rectangles */
+  kx = this.cutx1 - 1;
+  ky = this.cuty0;
+  while (kx >= 0 && ky < nbDiv) {
+    pa = this.points[2][nbDiv - 1 - kx];
+    pb = this.points[3][nbDiv - 1 - ky];
+    associate(pa, pb);
+    --kx; ++ky;
+  }
+
+/* lower right corner rectangles */
+  kx = this.cutx1;
+  ky = this.cuty1;
+  while (kx < nbDiv && ky < nbDiv) {
+    pa = this.points[2][nbDiv - 1 - kx];
+    pb = this.points[1][ky];
+    associate(pa, pb);
+    ++kx; ++ky;
+  }
+
+  function associate (pa, pb) {
+    pa.other = pb; pb.other = pa;
+    pa.corner = pb.corner = {x: pa.x, y: pb.y};
+    pa.radius = pb.radius = calcRadius(pa, pb);
+  }
+  function calcRadius (pa, pb) {
+    let x = mmin (mabs( pa.x - pb.x), mabs(pa.y - pb.y));
+    return (x - lDiv2) * (K * lSide2 - lDiv2) / (lSide - lDiv) + lDiv2;
+  }
+
+} // Square.prototype.connectPoints
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+Square.prototype.neighbor = function (kSide) {
+/* returns square neigbor to this one, of false
+remark : the common side on the neigbor square is (kSide ^ 2) */
+  const nkx = this.kx + [0,1,0,-1][kSide];
+  if (nkx < 0 || nkx >= nbx) return false; // exit terrain, no neighbor
+  const nky = this.ky + [-1,0,1,0][kSide];
+  if (nky < 0 || nky >= nby) return false; // exit terrain, no neighbor
+  return grid[nky][nkx];
+
+} // Square.prototype.neighbor
+//------------------------------------------------------------------------
+
+function Line(point) {
+/* creates a new line beginning at given point
+*/
+  let other, nkx, nky;
+  let start = point; // memorize initial point (to detect loops)
+  this.closed = false; // we presume
+  this.points = [point];
+  do {
+    point.line = this; // mark this point as belonging to this line
+    other = point.other;
+    other.line = this; // mark other point too
+    this.points.push(point.corner);
+    this.points.push(other);
+    this.points.push(point.radius);
+// point in neighbor square, to start new segment
+    point = other.neighbor();
+    if (point === false) break; // no neighbor, end of Line
+    if (! point.other) break; // no line on the other side : end of Line
+    if (point === start) {
+      this.closed = true; // (useful ?)
+      break; // closed Line, end of Line
+    }
+  } while (true);
+} // Line
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+Line.prototype.drawPath = function() {
+
+  let ctx = new Path2D();
+  ctx.moveTo (this.points[0].x, this.points[0].y);
+  let k = 1;
+  while (k < this.points.length) {
+    ctx.arcTo(this.points[k].x, this.points[k].y,
+                      this.points[k + 1].x, this.points[k + 1].y,
+                      this.points[k + 2]);
+    ctx.lineTo(this.points[k + 1].x, this.points[k + 1].y);
+    k += 3; // to next point of Line
+  } // while
+
+  this.path = ctx;
+}
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+Line.prototype.draw = function(alpha) {
+
+  const hue1 = monochrome ? hue : (this.hue ? this.hue : (this.hue = 1 + intAlea(360)));
+  const sat = varSat ? (this.sat ? this.sat : (this.sat = 30 + intAlea(71))) : 100;
+  ctx.strokeStyle = `hsl(${hue1}, ${sat}%, ${80 - 60 * alpha}%)`
+  if (! this.path) this.drawPath(); // cache path - sot sure this is useful
+  ctx.stroke(this.path);
+}
+
+//------------------------------------------------------------------------
+
+function createGrid() {
+
+  grid = new Array(nby).fill(0).map((v, ky) => new Array(nbx).fill(0).map((v, kx) => new Square(kx, ky)));
+  grid.forEach (row => row.forEach (sq => sq.connectPoints()));
+}
+
+//------------------------------------------------------------------------
+function findLines() {
+
+  let ln, neigh;
+
+  lines = [];
+
+/* first find open lines */
+  grid.forEach(row => row.forEach(sq => sq.points.forEach(sidePoints => sidePoints.forEach(point => {
+    if (! point.other) return; // no line here
+    if (point.line) return; // already belongs to a line
+    neigh = point.neighbor();
+    if (neigh && neigh.other) return; // is not at end of potentiel line
+    ln = new Line(point);
+    lines.push(ln);
+  }))));
+
+/* now add closed lines */
+  grid.forEach(row => row.forEach(sq => sq.points.forEach(sidePoints => sidePoints.forEach(point => {
+    if (! point.other) return; // no line here
+    if (point.line) return; // already belongs to a line
+    ln = new Line(point);
+    lines.push(ln);
+  }))));
+
+} // findLines
+
+//------------------------------------------------------------------------
+
+let animate;
+
+{ // scope for animate
+
+let animState = 0;
+let width;
+
+animate = function(tStamp) {
+
+  let event;
+  let alpha;
+
+  event = events.shift();
+  if (event && event.event == 'reset') animState = 0;
+  if (event && event.event == 'click') animState = 0;
+  window.requestAnimationFrame(animate)
+
+  switch (animState) {
+
+    case 0 :
+      if (startOver()) {
+        ++animState;
+      }
+      break;
+
+    case 1 :
+      ++animState;
+      createGrid();
+      findLines();
+      width = lDiv / 2;
+      break;
+
+    case 2 :
+      do {
+        alpha = width / (lDiv / 2); // 1 to 0
+        ctx.lineWidth = width;
+        lines.forEach(line => line.draw(alpha));
+      } while (-- width > 0);
+      ++animState;
+      break;
+
+    case 3:
+
+      ++animState;
+      break;
+
+  } // switch
+
+} // animate
+} // scope for animate
+
+//------------------------------------------------------------------------
+//------------------------------------------------------------------------
+
+function startOver() {
+
+// canvas dimensions
+
+  maxx = window.innerWidth;
+  maxy = window.innerHeight;
+
+  canv.width = maxx;
+  canv.height = maxy;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  let nbTries = 100;
+  do {
+    lSide = alea(msqrt (1 / NB_MAX_SQUARES), msqrt (1 / NB_MIN_SQUARES)) * msqrt(maxx * maxy);
+
+    nbx = mceil(maxx / lSide);
+    nby = mceil(maxy / lSide);
+
+//   nbx--; --nby;
+
+    offsx = (maxx - nbx * lSide) / 2;
+    offsy = (maxy - nby * lSide) / 2;
+
+    nbDiv = intAlea(NB_MIN_DIV, NB_MAX_DIV + 1);
+    lDiv = lSide / nbDiv;
+    if (--nbTries <= 0) break; // too many tries : keep values even if unsatisfying lDiv
+  } while (lDiv < 15); // don't like thin lines
+
+  hue = intAlea(360);
+
+  ctx.fillStyle = `hsl(${hue},100%,${intAlea(2)?5:95}%)`; // very light or very dark background
+  ctx.fillRect(0,0,maxx,maxy);
+  monochrome = (intAlea(5) == 0);
+  varSat = (intAlea(2) == 0);
+
+  if (firstRun) {
+    monochrome = false;
+    firstRun = false;
+  }
+
+  hue = (hue + 180) % 360;
+  sat = intAlea(60,101);
+
+  return true;
+
+} // startOver
+
+//------------------------------------------------------------------------
+
+function mouseClick(event) {
+  events.push({event:'click'});
+} // mouseClick
+
+
+//------------------------------------------------------------------------
+//------------------------------------------------------------------------
+// beginning of execution
+
+  {
+    canv = document.createElement('canvas');
+    canv.style.position="absolute";
+    document.body.appendChild(canv);
+    ctx = canv.getContext('2d');
+    canv.setAttribute ('title','click me');
+  } // création CANVAS
+  canv.addEventListener('click',mouseClick, false);
+  events = [{event:'reset'}];
+  requestAnimationFrame(animate);
+}); // window load listener
+
+ </script>
+    <svg viewBox="0 0 400 400" fill="#fff" stroke-width="3.5" stroke-linecap="round">
+        <mask id="helix"></mask>
+        <image mask="url(#helix)" href="https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&w=640&q=80"/>
+      </svg>
+
+</body>
+</html>
+
