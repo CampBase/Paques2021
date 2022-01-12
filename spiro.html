@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<!-- SVG.js spirograph https://codepen.io/michellebarker/pen/GRMBVYX -->
+<html>
+<head>
+<style>
+* {
+	box-sizing: border-box;
+}
+
+body {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	min-height: 100vh;
+	background: #030301;
+}
+
+svg {
+	width: 100%;
+	max-width: 600px;
+	height: auto;
+}
+
+button {
+	position: absolute;
+	top: 1rem;
+	left: 1rem;
+	border: none;
+	padding: 0.5rem 1rem;
+	border-radius: 0.5em;
+	background: #20202b;
+	color: #FFF;
+	border: 2px solid #20202b;
+	transform: border-color 200ms;
+}
+
+button:hover,
+button:focus {
+	border: 2px solid #FFF;
+}
+</style>
+</head>
+<body>
+
+    <script>
+import { spline } from "https://cdn.skypack.dev/@georgedoescode/generative-utils@1.0.37";
+
+const button = document.querySelector('[data-btn]')
+const draw = SVG().addTo('body').viewbox(0, 0, 600, 600)
+
+const cx = 300
+const cy = 300
+
+const createPoints = (radius1 = 100, radius2 = 50, ratio = 10) => {
+	let points = []
+	
+	for(let i = 0; i <= Math.PI * 2; i+= 0.01) {
+		const x = cx + radius1 * Math.cos(i) + radius2 * Math.cos(i * ratio)
+		const y = cy + radius1 * Math.sin(i) + radius2 * Math.sin(i * ratio)
+		
+		points.push({ x, y })
+	}
+	
+	return points
+}
+
+const createSpiro = (data, i, color) => {
+	const index = (3 - i) * 1.4
+	const r1 = (index * 35)
+	const r2 = r1 * (gsap.utils.random(1, 7, 1) * 0.1)
+	const ratio = gsap.utils.random(5, 60, 1)
+	const path = spline(createPoints(r1, r2, ratio), 1, true)
+	
+	return draw
+		.path(path)
+		.stroke({
+			width: 2,
+			color
+		})
+		.attr({
+			fill: 'none'
+		})
+}
+
+const generateSpiros = () => {
+	let hue = gsap.utils.random(0, 360, 1)
+	
+	return [...Array(3)].forEach((spiro, i) => {
+		const points = createPoints()
+		const lightness = i * 15 + 30
+		
+		if (i === 2) {
+			hue = hue + 200
+		} else {
+			hue = hue + i * 20
+		}
+		
+		const color = `hsl(${hue}, 75%, ${lightness}%)`
+		
+		return createSpiro(points, i, color)
+	})
+}
+
+const animate = () => {
+	const paths = draw.children()
+	
+	paths.forEach((path, i) => {
+		gsap.set(path.node, { scale: 0, transformOrigin: 'center' })
+		gsap.to(path.node, { 
+			scale: 1,
+			delay: i * 0.3,
+			duration: 1.5,
+			transformOrigin: 'center',
+			ease: 'back.out(1.2)'
+		})
+	})
+}
+
+generateSpiros()
+animate()
+
+button.addEventListener('click', () => {
+	draw.clear()
+	generateSpiros()
+	animate()
+})        
+    </script>
+    <button type="button" data-btn>Re-generate</button>
+</body>
+</html>
